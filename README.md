@@ -2,17 +2,50 @@
 
 本地优先的个人 IP 内容管理工具，帮助用户管理减重、塑形、皮肤亚健康、抗衰等素材，按周自动排期，调用 AI 生成朋友圈文案，保证一周内素材和文案不重复。用户审核后复制到微信发布。
 
-> 本项目分阶段开发，当前进度：**全部 9 阶段完成**（骨架 / SAF / Room / 素材库 / 排期 / AI 生成 / 今日待发 / 设置与备份 / 合规检测）。
+> 当前版本：**v1.2.1**（完整功能 + 自定义相册选择器 + OEM 兼容修复）
+>
+> 详细版本更新记录见 [CHANGELOG.md](./CHANGELOG.md)
+
+## 核心功能
+
+### 素材库
+- **两级导航**：文件夹列表页 → 文件夹素材页
+- **文件夹管理**：新建 / 删除 / 重命名 / 文件夹级设置（AI 语气、转化目标、冷却期等）
+- **自定义相册选择器**：通过 MediaStore 查询系统全部相册（不受系统 Photo Picker 3 相册限制），支持图片/视频网格多选
+- **AI OCR 自动识别**：导入素材时自动 ML Kit 中文 OCR
+- **自动标签提取**
+- **级联删除**：删除文件夹自动清理素材、排期、使用记录
+
+### 排期
+- **闹钟式时间选择**：Material3 TimePicker 时间轮选择 + 自动升序排序
+- **智能排期算法**：按使用次数升序选材，过滤冷却期，本周内素材不重复
+- **灵活调整**：换素材 / 上移下移 / 标记状态
+
+### AI 文案生成
+- OpenAI 兼容接口（DeepSeek / 通义 / Kimi / 智谱 / OpenAI）
+- 人设 + 素材 OCR + 合规红线 → 朋友圈文案（正文 + 3 备选 + 话题标签 + 配图建议）
+- API Key 加密存储（EncryptedSharedPreferences）
+
+### 今日待发
+- 当天排期汇总 + 文案预览
+- 一键复制 / 微信分享
+- 合规检测（绝对化承诺拦截 + 用户禁用词 + 风险词提示）
+
+### 数据安全
+- Room 数据库 + SAF 根目录，卸载不丢素材
+- 数据库迁移（V1→V2 新增 settingsJson）
+- Zip 备份导出
 
 ## 技术栈
 
 - Kotlin + Jetpack Compose（Material 3）
 - Hilt（依赖注入）
-- Room、DataStore、WorkManager
+- Room（含 Migration V1→V2）、DataStore、WorkManager
 - Retrofit + OkHttp
 - Coil
 - ML Kit（中文 OCR）
 - SAF（Storage Access Framework，DocumentFile）
+- MediaStore（自定义相册选择器）
 - 目标 SDK 34，最低 SDK 29（Android 10）
 
 ## 目录结构
