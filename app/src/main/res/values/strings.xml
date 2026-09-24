@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">个人IP打造</string>
+    <string name="root_folder_english">PersonalIP</string>
+    <string name="root_folder_display">个人IP打造</string>
+</resources>
