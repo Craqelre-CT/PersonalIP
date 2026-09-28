@@ -15,5 +15,9 @@ data class PostDraft(
     val tags: List<String>? = null,
     val imageSuggestion: String? = null,
     val publishTime: String? = null,
-    val complianceNote: String? = null
+    val complianceNote: String? = null,
+    /** 模型实际看到的图片内容描述（强制输出；若没看图则为 null/空）。 */
+    val imageDescription: String? = null,
+    /** 置信度：模型声称自己是否真正看到了图片。0-1 之间，或 null 表示不确定。 */
+    val imageSeen: Boolean? = null
 )

@@ -20,9 +20,9 @@ enum class AiProvider(
     DEEPSEEK(
         displayName = "DeepSeek",
         baseUrl = "https://api.deepseek.com/v1",
-        // DeepSeek 当前未开放公开视觉模型，文案生成使用 chat / reasoner。
+        // deepseek-chat 同时支持文本与图片输入（多模态）。
         textModels = listOf("deepseek-chat", "deepseek-reasoner"),
-        visionModels = emptyList(),
+        visionModels = listOf("deepseek-chat"),
         keyPlaceholder = "sk-...",
         signupUrl = "https://platform.deepseek.com/api_keys"
     ),
