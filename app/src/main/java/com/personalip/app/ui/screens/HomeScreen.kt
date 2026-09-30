@@ -293,6 +293,24 @@ private fun TodayPostCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                item.post.alternative2?.let {
+                    Text(
+                        "备选2：$it",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                item.post.alternative3?.let {
+                    Text(
+                        "备选3：$it",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 // 合规提醒：健康类内容必须附带。
                 Text(
                     "⚠ 合规提醒：本内容仅供参考，效果因人而异，严重情况请咨询专业人士。",

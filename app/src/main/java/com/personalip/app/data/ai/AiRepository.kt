@@ -203,7 +203,7 @@ class AiRepository @Inject constructor(
         }.getOrNull() ?: return@withContext RecognizeResult(error = "图片编码失败，无法发送给模型")
 
         val visionMessages = buildVisionMessages(direction, dataUri)
-        val result = runCatching { callApi(fullUrl, visionModel, visionMessages) }.getOrNull()
+        val result = runCatching { callApi(fullUrl, visionModel, visionMessages, temperature = 0.3) }.getOrNull()
             ?: return@withContext RecognizeResult(error = "视觉模型调用失败，请检查模型名与网络后重试")
         RecognizeResult(content = result.trim())
     }
@@ -244,7 +244,7 @@ class AiRepository @Inject constructor(
             recognizedContent, intent, style
         )
 
-        val rawText = runCatching { callApi(fullUrl, model, messages) }
+        val rawText = runCatching { callApi(fullUrl, model, messages, temperature = 1.0) }
             .getOrNull()
             ?: return@withContext GenerateResult(error = "AI 调用失败，请检查网络与接口配置后重试")
 
@@ -308,7 +308,7 @@ class AiRepository @Inject constructor(
         } ?: return null
 
         val visionMessages = buildVisionMessages(direction, dataUri)
-        return runCatching { callApi(fullUrl, visionModel, visionMessages) }
+        return runCatching { callApi(fullUrl, visionModel, visionMessages, temperature = 0.3) }
             .getOrNull()
     }
 
@@ -360,14 +360,21 @@ class AiRepository @Inject constructor(
             append("目标客户=${persona.targetAudience.ifBlank { "关注健康/身材的人群" }}。")
             append("\n${complianceChecker.systemRules(persona.forbiddenWords)}")
 
-            append("\n\n【最高优先级：文案必须基于图片识别结果】")
-            append("\n你会收到一段图片识别结果（阶段一由视觉模型输出）。写文案时必须遵守：")
+            append("\n\n【最高优先级 1：文案必须基于图片识别结果】")
+            append("\n你会收到一段图片识别结果（由视觉模型输出）。写文案时必须遵守：")
             append("\n1. 正文必须直接引用识别结果中提到的元素（场景/物品/人物/动作/文字）。")
             append("\n2. 绝对禁止编造识别结果里没有的东西。")
             append("\n   ❌ 识别结果是「健身房镜子前自拍」→ 不能写「早上喝温水排毒」")
             append("\n   ❌ 识别结果是「美食照片」→ 不能写「今天跑步 5 公里」")
             append("\n   ✅ 围绕识别结果的真实元素写感受。")
-            append("\n3. 文案主题由「分类名」+「识别结果」+「用户意图」共同决定，冲突时以识别结果为准。")
+
+            append("\n\n【最高优先级 2：四个文案必须完全不同】")
+            append("\ncontent + alternative1 + alternative2 + alternative3，四条文案必须：")
+            append("\n• 开头句式不同（不要都用'站在'/'今天'开头）")
+            append("\n• 情绪角度不同（一条分享感受、一条记录事实、一条提问互动、一条感悟升华）")
+            append("\n• 提到识别结果里的不同元素（如果识别到 5 个元素，四个文案各自侧重 2-3 个）")
+            append("\n• 字数可以略有差别（100-180 字之间）")
+            append("\n• 绝对禁止出现相同的长句或高度相似的段落")
 
             append("\n\n请严格输出 JSON：content(正文)、alternative1/2/3(三个备选)、")
             append("tags(话题标签数组)、imageSuggestion(描述这张图)、")
@@ -383,6 +390,8 @@ class AiRepository @Inject constructor(
             append("【文案风格】：${style.label}（${style.hint}）\n")
             append("\n请按以上信息写一条符合人设的朋友圈文案。")
             append("正文必须与图片识别结果直接相关，不要编造。")
+            append("\n⚠ 特别注意：content 和三个备选 alternative1/2/3 必须有明显差异，")
+            append("不要只是换几个词改改，要从不同角度切入。")
         }
 
         return listOf(
@@ -394,9 +403,10 @@ class AiRepository @Inject constructor(
     private suspend fun callApi(
         url: String,
         model: String,
-        messages: List<ChatMessage>
+        messages: List<ChatMessage>,
+        temperature: Double = 0.9
     ): String {
-        val request = ChatRequest(model = model, messages = messages, temperature = 0.85)
+        val request = ChatRequest(model = model, messages = messages, temperature = temperature)
         val response = openAiApi.chatCompletion(url, request)
         return response.choices.firstOrNull()?.message?.content
             ?: throw IllegalStateException("空响应")
