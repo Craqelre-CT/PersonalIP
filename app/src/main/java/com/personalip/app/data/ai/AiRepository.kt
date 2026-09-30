@@ -172,14 +172,131 @@ class AiRepository @Inject constructor(
     }
 
     /**
-     * 阶段一：调视觉模型识别图片内容。
+     * 阶段一（公开）：调视觉模型识别图片内容。
+     *
+     * 两阶段交互式流程的入口：用户给识别方向 → 调视觉模型 → 返回识别结果。
+     * 用户看到结果后可确认或改方向重新识别，确认后再调 [writeCaption]。
+     *
+     * @param materialId 素材 id
+     * @param direction 用户手输的识别方向（如"重点识别健身器材/动作/身材"），空则用默认方向
+     */
+    suspend fun recognizeImage(
+        materialId: Long,
+        direction: String
+    ): RecognizeResult = withContext(Dispatchers.IO) {
+        val material = materialDao.getById(materialId)
+            ?: return@withContext RecognizeResult(error = "素材不存在")
+        if (!material.mimeType.startsWith("image/")) {
+            return@withContext RecognizeResult(error = "素材不是图片，无法识别")
+        }
+
+        val baseUrl = aiConfig.baseUrlFlow.first()
+        val visionModel = aiConfig.visionModelFlow.first()
+        if (baseUrl.isNullOrBlank() || visionModel.isNullOrBlank() || !aiConfig.isConfigured()) {
+            return@withContext RecognizeResult(error = "请先在设置中配置视觉模型（baseUrl / apiKey / 视觉模型）")
+        }
+        val fullUrl = baseUrl.trimEnd('/') + "/chat/completions"
+
+        val dataUri = runCatching {
+            materialRepository.resolveMaterialDocument(material)?.uri
+                ?.let { imageEncoder.encodeToDataUri(it) }
+        }.getOrNull() ?: return@withContext RecognizeResult(error = "图片编码失败，无法发送给模型")
+
+        val visionMessages = buildVisionMessages(direction, dataUri)
+        val result = runCatching { callApi(fullUrl, visionModel, visionMessages) }.getOrNull()
+            ?: return@withContext RecognizeResult(error = "视觉模型调用失败，请检查模型名与网络后重试")
+        RecognizeResult(content = result.trim())
+    }
+
+    /**
+     * 阶段二（公开）：用识别结果 + 用户意图 + 风格 → 文本 AI 写朋友圈文案。
+     *
+     * 文案模型不再需要多模态能力——它只看文字（识别结果 + 意图 + 风格），
+     * 这样即使文案模型不支持图片输入也能正常工作。
+     *
+     * @param planId 排期 id（用于取素材/分类/人设/落库/写 Markdown）
+     * @param recognizedContent 阶段一识别结果（用户已确认）
+     * @param intent 用户要表达的意思（手输）
+     * @param style 风格快捷按钮对应的枚举
+     */
+    suspend fun writeCaption(
+        planId: Long,
+        recognizedContent: String,
+        intent: String,
+        style: CaptionStyle
+    ): GenerateResult = withContext(Dispatchers.IO) {
+        val plan = weeklyPlanDao.getById(planId)
+            ?: return@withContext GenerateResult(error = "排期不存在")
+        val material = materialDao.getById(plan.materialId)
+            ?: return@withContext GenerateResult(error = "素材不存在")
+        val category = categoryDao.getById(material.categoryId)
+        val persona = personaDao.get() ?: PersonaEntity()
+
+        val baseUrl = aiConfig.baseUrlFlow.first()
+        val model = aiConfig.modelFlow.first()
+        if (baseUrl.isNullOrBlank() || model.isNullOrBlank() || !aiConfig.isConfigured()) {
+            return@withContext GenerateResult(error = "请先在设置中配置 AI 接口（baseUrl / apiKey / 文案模型）")
+        }
+        val fullUrl = baseUrl.trimEnd('/') + "/chat/completions"
+
+        val messages = buildCaptionMessages(
+            material, category?.displayName ?: "未分类", persona,
+            recognizedContent, intent, style
+        )
+
+        val rawText = runCatching { callApi(fullUrl, model, messages) }
+            .getOrNull()
+            ?: return@withContext GenerateResult(error = "AI 调用失败，请检查网络与接口配置后重试")
+
+        val draft = parseDraft(rawText)
+        val hits = complianceChecker.check(draft.content, persona.forbiddenWords)
+        val complianceNote = buildComplianceNote(draft.complianceNote, hits)
+
+        val post = PostEntity(
+            materialId = material.id,
+            content = draft.content.ifBlank { rawText },
+            alternative1 = draft.alternative1,
+            alternative2 = draft.alternative2,
+            alternative3 = draft.alternative3,
+            tags = (draft.tags ?: emptyList()),
+            imageSuggestion = draft.imageSuggestion,
+            publishTime = plan.time,
+            status = PostStatus.PENDING
+        )
+        val postId = postDao.upsert(post)
+
+        saveMarkdown(
+            weekId = plan.weekId,
+            dayOfWeek = plan.dayOfWeek,
+            time = plan.time,
+            categoryFolderName = category?.folderName ?: category?.displayName ?: "未分类",
+            post = post.copy(id = postId),
+            complianceNote = complianceNote,
+            rawText = rawText,
+            imageDescription = recognizedContent
+        )
+
+        weeklyPlanDao.updateStatusAndPost(planId, PostStatus.PENDING, postId)
+        GenerateResult(
+            postId = postId,
+            complianceHits = hits,
+            complianceNote = complianceNote,
+            content = draft.content.ifBlank { rawText },
+            alternatives = listOfNotNull(draft.alternative1, draft.alternative2, draft.alternative3),
+            tags = draft.tags ?: emptyList()
+        )
+    }
+
+    /**
+     * 阶段一：调视觉模型识别图片内容（内部，供 [generateForPlan] 兼容路径调用）。
      * - 若素材不是图片、或未配置视觉模型、或编码失败 → 返回 null（跳过本阶段）。
      * - 失败时返回 null，不影响主流程（仅退化为仅文本）。
      */
     private suspend fun recognizeImageIfPossible(
         fullUrl: String,
         visionModel: String?,
-        material: MaterialEntity
+        material: MaterialEntity,
+        direction: String = "图片中可见的关键信息"
     ): String? {
         if (visionModel.isNullOrBlank()) return null
         if (!material.mimeType.startsWith("image/")) return null
@@ -190,28 +307,88 @@ class AiRepository @Inject constructor(
             null
         } ?: return null
 
-        val visionMessages = listOf(
+        val visionMessages = buildVisionMessages(direction, dataUri)
+        return runCatching { callApi(fullUrl, visionModel, visionMessages) }
+            .getOrNull()
+    }
+
+    /** 组装视觉模型识别消息（阶段一共用）。 */
+    private fun buildVisionMessages(direction: String, dataUri: String): List<ChatMessage> {
+        val dir = if (direction.isBlank()) "图片中可见的关键信息" else direction
+        return listOf(
             ChatMessage(
                 role = "system",
                 content = listOf(
                     ContentPart(
                         type = "text",
-                        text = "你是图片内容识别助手。请用中文输出图片中可见的关键信息，" +
-                            "包括：场景、主体（人/物/食物/截图等）、可见文字、颜色风格、情绪。" +
-                            "只输出一段 200 字以内的客观描述，不要扩展或评论。"
+                        text = "你是图片内容识别助手。请按用户给的方向识别图片内容。" +
+                            "只输出一段 200 字以内的客观描述，不要扩展、评论或写文案。" +
+                            "如果图片中没有用户要找的元素，如实说明「未发现」并描述你实际看到的内容。"
                     )
                 )
             ),
             ChatMessage(
                 role = "user",
                 content = listOf(
-                    ContentPart(type = "text", text = "请描述这张图片的内容。"),
+                    ContentPart(type = "text", text = "识别方向：$dir\n请识别这张图片中与此方向相关的内容。"),
                     ContentPart(type = "image_url", imageUrl = ImageUrl(dataUri))
                 )
             )
         )
-        return runCatching { callApi(fullUrl, visionModel, visionMessages) }
-            .getOrNull()
+    }
+
+    /**
+     * 阶段二：组装文案生成消息（两阶段交互式流程专用）。
+     *
+     * 文案模型只看文字：识别结果 + 用户意图 + 风格 + 人设。
+     * 不再传图给文案模型（识别已在阶段一完成）。
+     */
+    private fun buildCaptionMessages(
+        material: MaterialEntity,
+        categoryDisplay: String,
+        persona: PersonaEntity,
+        recognizedContent: String,
+        intent: String,
+        style: CaptionStyle
+    ): List<ChatMessage> {
+        val system = buildString {
+            append("你是「${persona.nickname.ifBlank { "我" }}」的私域朋友圈代写助手。")
+            append("人设：身份=${persona.identity.ifBlank { "未设定" }}；")
+            append("专业背景=${persona.background.ifBlank { "未设定" }}；")
+            append("性格=${persona.personality.ifBlank { "未设定" }}；")
+            append("口头禅=${persona.catchphrase.ifBlank { "无" }}；")
+            append("目标客户=${persona.targetAudience.ifBlank { "关注健康/身材的人群" }}。")
+            append("\n${complianceChecker.systemRules(persona.forbiddenWords)}")
+
+            append("\n\n【最高优先级：文案必须基于图片识别结果】")
+            append("\n你会收到一段图片识别结果（阶段一由视觉模型输出）。写文案时必须遵守：")
+            append("\n1. 正文必须直接引用识别结果中提到的元素（场景/物品/人物/动作/文字）。")
+            append("\n2. 绝对禁止编造识别结果里没有的东西。")
+            append("\n   ❌ 识别结果是「健身房镜子前自拍」→ 不能写「早上喝温水排毒」")
+            append("\n   ❌ 识别结果是「美食照片」→ 不能写「今天跑步 5 公里」")
+            append("\n   ✅ 围绕识别结果的真实元素写感受。")
+            append("\n3. 文案主题由「分类名」+「识别结果」+「用户意图」共同决定，冲突时以识别结果为准。")
+
+            append("\n\n请严格输出 JSON：content(正文)、alternative1/2/3(三个备选)、")
+            append("tags(话题标签数组)、imageSuggestion(描述这张图)、")
+            append("publishTime(建议发布时间)、complianceNote(合规提醒)。")
+            append("不要输出 JSON 之外的任何内容。")
+        }
+
+        val userText = buildString {
+            append("【分类】：$categoryDisplay\n")
+            if (material.tags.isNotEmpty()) append("【标签】：${material.tags.joinToString("、")}\n")
+            append("【图片识别结果】：\n$recognizedContent\n")
+            append("【要表达的意思】：${intent.ifBlank { "无特殊意图，请围绕图片内容自然发挥" }}\n")
+            append("【文案风格】：${style.label}（${style.hint}）\n")
+            append("\n请按以上信息写一条符合人设的朋友圈文案。")
+            append("正文必须与图片识别结果直接相关，不要编造。")
+        }
+
+        return listOf(
+            ChatMessage(role = "system", content = listOf(ContentPart(type = "text", text = system))),
+            ChatMessage(role = "user", content = listOf(ContentPart(type = "text", text = userText)))
+        )
     }
 
     private suspend fun callApi(
@@ -486,7 +663,21 @@ data class GenerateResult(
     val postId: Long? = null,
     val complianceHits: List<com.personalip.app.data.compliance.ComplianceHit> = emptyList(),
     val complianceNote: String? = null,
-    val error: String? = null
+    val error: String? = null,
+    /** 生成的正文（Done 状态供 UI 直接展示）。 */
+    val content: String? = null,
+    /** 备选文案。 */
+    val alternatives: List<String> = emptyList(),
+    /** 话题标签。 */
+    val tags: List<String> = emptyList()
 ) {
     val isSuccess: Boolean get() = postId != null
+}
+
+/** 阶段一图片识别结果。content 有值表示成功，error 有值表示失败。 */
+data class RecognizeResult(
+    val content: String? = null,
+    val error: String? = null
+) {
+    val isSuccess: Boolean get() = !content.isNullOrBlank()
 }

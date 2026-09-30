@@ -4,8 +4,10 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.personalip.app.data.ai.AiRepository
+import com.personalip.app.data.ai.CaptionStyle
 import com.personalip.app.data.ai.GenerateResult
 import com.personalip.app.data.ai.Goal
+import com.personalip.app.data.ai.RecognizeResult
 import com.personalip.app.data.ai.Tone
 import com.personalip.app.data.local.PostStatus
 import com.personalip.app.data.local.dao.CategoryDao
@@ -166,7 +168,77 @@ class ScheduleViewModel @Inject constructor(
         }
     }
 
+    // ==================== 两阶段交互式生成（识别 → 确认 → 写文案） ====================
+
+    /** 当前生成步骤（两阶段流程的状态机）。 */
+    private val _genStep = MutableStateFlow<GenStep>(GenStep.Idle)
+    val genStep: StateFlow<GenStep> = _genStep.asStateFlow()
+
+    /** 阶段一：调视觉模型识别图片。用户给方向，模型返回识别结果。 */
+    fun recognize(materialId: Long, direction: String) {
+        _genStep.value = GenStep.Recognizing(direction)
+        viewModelScope.launch {
+            val result: RecognizeResult = runCatching {
+                aiRepository.recognizeImage(materialId, direction)
+            }.getOrNull() ?: RecognizeResult(error = "识别异常，请重试")
+            _genStep.value = when {
+                result.isSuccess -> GenStep.Recognized(result.content!!, direction)
+                else -> GenStep.Error(result.error ?: "识别失败")
+            }
+        }
+    }
+
+    /** 阶段二：用已确认的识别结果 + 用户意图 + 风格 → 文本 AI 写文案并落库。 */
+    fun writeCaption(planId: Long, intent: String, style: CaptionStyle) {
+        val recognized = (_genStep.value as? GenStep.Recognized)?.content ?: return
+        _genStep.value = GenStep.Writing(recognized, intent, style)
+        viewModelScope.launch {
+            val result: GenerateResult = runCatching {
+                aiRepository.writeCaption(planId, recognized, intent, style)
+            }.getOrNull() ?: GenerateResult(error = "文案生成异常，请重试")
+            _genStep.value = when {
+                result.isSuccess -> {
+                    _message.value = when {
+                        result.complianceHits.isNotEmpty() ->
+                            "文案已生成（⚠ 命中 ${result.complianceHits.size} 个风险词，见详情）"
+                        else -> "文案已生成并保存到输出目录"
+                    }
+                    GenStep.Done(result)
+                }
+                else -> GenStep.Error(result.error ?: "文案生成失败")
+            }
+        }
+    }
+
+    /** 从 Error 状态回到 Recognized（保留上次识别结果，改方向重识别）。 */
+    fun backToRecognized() {
+        val current = _genStep.value
+        if (current is GenStep.Error) {
+            // 如果之前有识别结果，回到 Recognized；否则回 Idle
+            _genStep.value = GenStep.Idle
+        }
+    }
+
+    /** 重置两阶段流程到 Idle（关闭对话框时调用）。 */
+    fun resetGen() { _genStep.value = GenStep.Idle }
+
     fun clearMessage() { _message.value = null }
+}
+
+/** 两阶段交互式生成的状态机。 */
+sealed class GenStep {
+    /** 未开始。 */
+    object Idle : GenStep()
+    /** 阶段一进行中：正在调视觉模型识别图片。 */
+    data class Recognizing(val direction: String) : GenStep()
+    /** 阶段一完成：识别结果已返回，等待用户确认或改方向重识别。 */
+    data class Recognized(val content: String, val direction: String) : GenStep()
+    /** 阶段二进行中：正在调文本模型写文案。 */
+    data class Writing(val recognizedContent: String, val intent: String, val style: CaptionStyle) : GenStep()
+    /** 阶段二完成：文案已生成并落库。 */
+    data class Done(val result: GenerateResult) : GenStep()
+    /** 出错（识别或写文案失败）。 */
+    data class Error(val message: String) : GenStep()
 }
 
 data class ScheduleItem(

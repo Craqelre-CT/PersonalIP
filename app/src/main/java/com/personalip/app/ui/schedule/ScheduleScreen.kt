@@ -59,8 +59,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
-import com.personalip.app.data.ai.Goal
-import com.personalip.app.data.ai.Tone
 import com.personalip.app.data.local.PostStatus
 import com.personalip.app.ui.ai.AiConfigDialog
 
@@ -82,8 +80,6 @@ fun ScheduleScreen(
     // AI 配置 / 生成对话框状态。
     var showAiConfig by remember { mutableStateOf(false) }
     var showGenerateDialog by remember { mutableStateOf<Long?>(null) }
-    var selectedTone by remember { mutableStateOf(Tone.WARM) }
-    var selectedGoal by remember { mutableStateOf(Goal.LIKE) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(message) {
@@ -197,57 +193,16 @@ fun ScheduleScreen(
         AiConfigDialog(onDismiss = { showAiConfig = false })
     }
 
-    // 生成朋友圈对话框（选语气 / 转化目标）。
+    // 两阶段生成对话框（识别 → 确认 → 写文案）。
     showGenerateDialog?.let { planId ->
-        AlertDialog(
-            onDismissRequest = { showGenerateDialog = null },
-            title = { Text("生成朋友圈文案") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("选择语气和转化目标", style = MaterialTheme.typography.bodyMedium)
-                    Text("语气", style = MaterialTheme.typography.labelLarge)
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(Tone.entries) { tone ->
-                            FilterChip(
-                                selected = selectedTone == tone,
-                                onClick = { selectedTone = tone },
-                                label = { Text(tone.label) }
-                            )
-                        }
-                    }
-                    Text("转化目标", style = MaterialTheme.typography.labelLarge)
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(Goal.entries) { goal ->
-                            FilterChip(
-                                selected = selectedGoal == goal,
-                                onClick = { selectedGoal = goal },
-                                label = { Text(goal.label) }
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.generatePost(planId, selectedTone, selectedGoal)
-                        showGenerateDialog = null
-                    },
-                    enabled = !generating
-                ) {
-                    if (generating && generatingPlanId == planId) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Text("生成")
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showGenerateDialog = null }) { Text("取消") }
-            }
+        val item = items.find { it.plan.id == planId }
+        GenerateDialog(
+            planId = planId,
+            materialId = item?.material?.id,
+            materialUri = item?.materialUri,
+            categoryDisplay = item?.categoryDisplay ?: "未分类",
+            viewModel = viewModel,
+            onDismiss = { showGenerateDialog = null }
         )
     }
 }

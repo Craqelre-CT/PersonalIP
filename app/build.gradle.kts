@@ -14,8 +14,8 @@ android {
         applicationId = "com.personalip.app"
         minSdk = 29
         targetSdk = 34
-        versionCode = 6
-        versionName = "1.2.3"
+        versionCode = 7
+        versionName = "2.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
