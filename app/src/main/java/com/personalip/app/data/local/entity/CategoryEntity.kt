@@ -20,8 +20,8 @@ data class CategoryEntity(
     val createdAt: Long = System.currentTimeMillis()
 ) {
     companion object {
-        /** 默认文件夹设置：自动OCR+自动标签开、语气亲和、目标点赞、冷却7天。 */
+        /** 默认文件夹设置：自动OCR+自动标签开、语气亲和、目标点赞；冷却期留空=跟随全局。 */
         const val DEFAULT_SETTINGS_JSON =
-            """{"autoOcr":true,"autoTags":true,"postTone":"亲和","postGoal":"点赞","cooldownDays":7}"""
+            """{"autoOcr":true,"autoTags":true,"postTone":"亲和","postGoal":"点赞"}"""
     }
 }

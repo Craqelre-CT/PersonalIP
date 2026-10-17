@@ -23,6 +23,7 @@ import com.personalip.app.data.schedule.ScheduleRepository
 import com.personalip.app.data.schedule.WeekIdUtil
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.time.LocalDate
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,7 +37,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.flowOn
 
 /**
- * 今日待发：展示当天（ISO 周几）的排期项 + 已生成的朋友圈文案，
+ * 今日待发：展示当天日期的排期项 + 已生成的朋友圈文案，
  * 支持复制文案到剪贴板、系统分享（默认微信）、状态标记（草稿/待发/已发/跳过）。
  *
  * 不做自动发布朋友圈，只做复制到剪贴板和系统分享。
@@ -54,8 +55,8 @@ class HomeViewModel @Inject constructor(
     private val complianceChecker: ComplianceChecker
 ) : ViewModel() {
 
-    private val weekId: String = WeekIdUtil.weekIdOf()
-    private val dayOfWeek: Int = WeekIdUtil.dayOfWeekValue()
+    /** 今日日期键（ISO，如 "2026-09-30"），进入页面后固定。 */
+    private val todayKey: String = WeekIdUtil.dateKey(LocalDate.now())
 
     private val categories: StateFlow<List<CategoryEntity>> = categoryDao.observeAll()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
@@ -65,7 +66,7 @@ class HomeViewModel @Inject constructor(
 
     /** 今日排期项 + 关联文案 + 素材。 */
     val items: StateFlow<List<HomeItem>> =
-        combine(weeklyPlanDao.observeToday(weekId, dayOfWeek), categories) { plans, cats ->
+        combine(weeklyPlanDao.observeByDate(todayKey), categories) { plans, cats ->
             val byId = cats.associateBy { it.id }
             plans.map { plan ->
                 val material = plan.materialId.takeIf { it > 0 }?.let { materialDao.getById(it) }
@@ -77,7 +78,7 @@ class HomeViewModel @Inject constructor(
                     post = post,
                     categoryDisplay = material?.categoryId?.let { byId[it]?.displayName }
                         ?: "未分类",
-                    dayLabel = WeekIdUtil.dayLabel(plan.dayOfWeek)
+                    dayLabel = WeekIdUtil.dateLabelOf(plan.date)
                 )
             }
         }.flowOn(Dispatchers.IO)

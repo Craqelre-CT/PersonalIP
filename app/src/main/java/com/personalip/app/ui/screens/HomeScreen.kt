@@ -51,6 +51,7 @@ import com.personalip.app.data.compliance.ComplianceHit
 import com.personalip.app.data.compliance.Level
 import com.personalip.app.data.local.PostStatus
 import com.personalip.app.data.schedule.WeekIdUtil
+import java.time.LocalDate
 import kotlinx.coroutines.launch
 
 /**
@@ -67,8 +68,7 @@ import kotlinx.coroutines.launch
 fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
-    val weekId = WeekIdUtil.weekIdOf()
-    val dayLabel = WeekIdUtil.dayLabelOf()
+    val todayLabel = WeekIdUtil.dateLabel(LocalDate.now())
     val items by viewModel.items.collectAsStateWithLifecycle()
     val copyMessage by viewModel.copyMessage.collectAsStateWithLifecycle()
 
@@ -89,7 +89,7 @@ fun HomeScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = { TopAppBar(title = { Text("今日待发 · $dayLabel（$weekId）") }) }
+        topBar = { TopAppBar(title = { Text("今日待发 · $todayLabel") }) }
     ) { padding ->
         if (items.isEmpty()) {
             Box(
@@ -99,7 +99,7 @@ fun HomeScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("今天没有排期", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "请先到「排期」页生成本周计划并 AI 生成文案",
+                        "请先到「排期」页生成计划并 AI 生成文案",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

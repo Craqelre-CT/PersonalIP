@@ -67,7 +67,8 @@ import com.personalip.app.ui.ai.AiConfigDialog
 fun ScheduleScreen(
     viewModel: ScheduleViewModel = hiltViewModel()
 ) {
-    val weekId = viewModel.weekId
+    val startDateLabel = viewModel.startDateLabel
+    val days by viewModel.days.collectAsStateWithLifecycle()
     val categories by viewModel.categories.collectAsStateWithLifecycle()
     val slotTimes by viewModel.slotTimes.collectAsStateWithLifecycle()
     val cooldownDays by viewModel.cooldownDays.collectAsStateWithLifecycle()
@@ -81,6 +82,10 @@ fun ScheduleScreen(
     var showAiConfig by remember { mutableStateOf(false) }
     var showGenerateDialog by remember { mutableStateOf<Long?>(null) }
 
+    // 计划天数输入框的本地状态（与 days 双向同步）。
+    var daysInput by remember { mutableStateOf(days.toString()) }
+    LaunchedEffect(days) { daysInput = days.toString() }
+
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(message) {
         message?.let { snackbarHostState.showSnackbar(it); viewModel.clearMessage() }
@@ -88,7 +93,7 @@ fun ScheduleScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = { TopAppBar(title = { Text("一周排期（$weekId）") }) }
+        topBar = { TopAppBar(title = { Text("排期计划") }) }
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
@@ -114,7 +119,7 @@ fun ScheduleScreen(
                                 Icon(Icons.Filled.Add, contentDescription = "增加时段")
                             }
                             Text(
-                                "共 ${slotTimes.size} 条/天 × 7 天 = ${slotTimes.size * 7} 条",
+                                "共 ${slotTimes.size} 条/天 × $days 天 = ${slotTimes.size * days} 条",
                                 modifier = Modifier.padding(start = 4.dp),
                                 style = MaterialTheme.typography.bodyMedium
                             )
@@ -125,13 +130,38 @@ fun ScheduleScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
+                        Text("计划天数（从「$startDateLabel」起，可跨周）", style = MaterialTheme.typography.labelLarge)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = daysInput,
+                                onValueChange = { v ->
+                                    val filtered = v.filter { it.isDigit() }.take(2)
+                                    daysInput = filtered
+                                    filtered.toIntOrNull()?.let { viewModel.setDays(it) }
+                                },
+                                singleLine = true,
+                                modifier = Modifier.width(88.dp)
+                            )
+                            Text("天", style = MaterialTheme.typography.bodyMedium)
+                            listOf(7, 14, 30).forEach { d ->
+                                FilterChip(
+                                    selected = days == d,
+                                    onClick = { viewModel.setDays(d) },
+                                    label = { Text("${d}天") }
+                                )
+                            }
+                        }
+
                         Text("冷却期（避免短期内重复使用）", style = MaterialTheme.typography.labelLarge)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf(7, 14, 30).forEach { days ->
+                            listOf(7, 14, 30).forEach { d ->
                                 FilterChip(
-                                    selected = cooldownDays == days,
-                                    onClick = { viewModel.setCooldown(days) },
-                                    label = { Text("${days}天") }
+                                    selected = cooldownDays == d,
+                                    onClick = { viewModel.setCooldown(d) },
+                                    label = { Text("${d}天") }
                                 )
                             }
                         }
@@ -159,7 +189,7 @@ fun ScheduleScreen(
                             } else {
                                 Icon(Icons.Filled.AutoAwesome, contentDescription = null)
                             }
-                            Text(if (generating) " 生成中…" else " 生成本周计划")
+                            Text(if (generating) " 生成中…" else " 生成计划")
                         }
 
                         // AI 接口配置入口（baseUrl / 模型 / API Key）。

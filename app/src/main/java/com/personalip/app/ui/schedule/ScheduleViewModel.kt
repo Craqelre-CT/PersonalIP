@@ -18,6 +18,7 @@ import com.personalip.app.data.material.MaterialRepository
 import com.personalip.app.data.schedule.ScheduleRepository
 import com.personalip.app.data.schedule.WeekIdUtil
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.time.LocalDate
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,7 +40,12 @@ class ScheduleViewModel @Inject constructor(
     categoryDao: CategoryDao
 ) : ViewModel() {
 
-    val weekId: String = WeekIdUtil.weekIdOf()
+    /** 计划起始日（默认今天，进入页面后固定）。 */
+    private val startDate: LocalDate = LocalDate.now()
+    private val todayKey: String = WeekIdUtil.dateKey(startDate)
+
+    /** 起始日展示标签，如 "09-30 周三"。 */
+    val startDateLabel: String = WeekIdUtil.dateLabel(startDate)
 
     val categories: StateFlow<List<CategoryEntity>> = categoryDao.observeAll()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
@@ -47,6 +53,11 @@ class ScheduleViewModel @Inject constructor(
     private val _slotTimes = MutableStateFlow(listOf("08:00", "12:00", "18:00"))
     val slotTimes: StateFlow<List<String>> = _slotTimes.asStateFlow()
 
+    /** 计划天数（从今天起连续 N 天，可跨周）。 */
+    private val _days = MutableStateFlow(7)
+    val days: StateFlow<Int> = _days.asStateFlow()
+
+    /** 全局冷却期（分类未单独设置时的兜底）。 */
     private val _cooldownDays = MutableStateFlow(7)
     val cooldownDays: StateFlow<Int> = _cooldownDays.asStateFlow()
 
@@ -64,7 +75,7 @@ class ScheduleViewModel @Inject constructor(
     val message: StateFlow<String?> = _message.asStateFlow()
 
     private val plans: StateFlow<List<WeeklyPlanEntity>> =
-        scheduleRepository.observeWeek(weekId)
+        scheduleRepository.observeActive(todayKey)
             .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     /** 排期列表项：携带素材信息与缩略图 Uri。 */
@@ -80,13 +91,14 @@ class ScheduleViewModel @Inject constructor(
                         materialUri = material?.let { materialRepository.resolveMaterialUri(it) },
                         categoryDisplay = material?.categoryId?.let { byId[it]?.displayName }
                             ?: "未分类",
-                        dayLabel = WeekIdUtil.dayLabel(plan.dayOfWeek),
+                        dayLabel = WeekIdUtil.dateLabelOf(plan.date),
                         statusLabel = plan.status.label
                     )
                 }
             }.flowOn(Dispatchers.IO)
             .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
+    fun setDays(days: Int) { _days.value = days.coerceIn(1, 60) }
     fun setCooldown(days: Int) { _cooldownDays.value = days }
     fun toggleCategory(id: Long) {
         _selectedCategoryIds.value = _selectedCategoryIds.value.toMutableList()
@@ -119,31 +131,32 @@ class ScheduleViewModel @Inject constructor(
         _generating.value = true
         viewModelScope.launch {
             val result = runCatching {
-                scheduleRepository.generateWeek(
-                    weekId = weekId,
+                scheduleRepository.generatePlan(
+                    startDate = startDate,
+                    days = _days.value,
                     slotTimes = _slotTimes.value,
                     categoryIds = _selectedCategoryIds.value,
-                    cooldownDays = _cooldownDays.value
+                    globalCooldownDays = _cooldownDays.value
                 )
             }.getOrNull()
             _generating.value = false
             _message.value = when {
                 result == null -> "生成失败，请重试"
                 result.shortfall != null -> result.shortfall.toMessage()
-                else -> "已生成 ${result.plans.size} 条本周计划"
+                else -> "已生成 ${result.plans.size} 条计划（从今天起 ${_days.value} 天）"
             }
         }
     }
 
     fun replaceMaterial(planId: Long) {
         viewModelScope.launch {
-            val ok = scheduleRepository.replaceMaterial(planId, weekId)
+            val ok = scheduleRepository.replaceMaterial(planId)
             _message.value = if (ok) "已替换为其它素材" else "没有更多可用素材"
         }
     }
 
     fun movePlan(planId: Long, up: Boolean) {
-        viewModelScope.launch { scheduleRepository.movePlan(planId, weekId, up) }
+        viewModelScope.launch { scheduleRepository.movePlan(planId, up) }
     }
 
     fun setStatus(planId: Long, status: PostStatus) {
@@ -212,11 +225,7 @@ class ScheduleViewModel @Inject constructor(
 
     /** 从 Error 状态回到 Recognized（保留上次识别结果，改方向重识别）。 */
     fun backToRecognized() {
-        val current = _genStep.value
-        if (current is GenStep.Error) {
-            // 如果之前有识别结果，回到 Recognized；否则回 Idle
-            _genStep.value = GenStep.Idle
-        }
+        _genStep.value = GenStep.Idle
     }
 
     /** 重置两阶段流程到 Idle（关闭对话框时调用）。 */

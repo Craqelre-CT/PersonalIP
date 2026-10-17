@@ -750,7 +750,7 @@ private fun FolderSettingsDialog(
     var autoTags by remember { mutableStateOf(true) }
     var postTone by remember { mutableStateOf("亲和") }
     var postGoal by remember { mutableStateOf("点赞") }
-    var cooldownDays by remember { mutableStateOf("7") }
+    var cooldownDays by remember { mutableStateOf("") }
 
     LaunchedEffect(folderId) {
         val s = onLoad()
@@ -759,7 +759,7 @@ private fun FolderSettingsDialog(
         autoTags = s.autoTags
         postTone = s.postTone
         postGoal = s.postGoal
-        cooldownDays = (s.cooldownDays ?: 7).toString()
+        cooldownDays = s.cooldownDays?.toString() ?: ""
     }
 
     AlertDialog(
@@ -816,7 +816,7 @@ private fun FolderSettingsDialog(
                 OutlinedTextField(
                     value = cooldownDays,
                     onValueChange = { cooldownDays = it.filter { c -> c.isDigit() }.take(2) },
-                    label = { Text("同素材冷却期（天，1-90）") },
+                    label = { Text("同素材冷却期（天，1-90，留空跟随全局）") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     modifier = Modifier.fillMaxWidth()
@@ -825,7 +825,7 @@ private fun FolderSettingsDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                val cd = cooldownDays.toIntOrNull()?.coerceIn(1, 90) ?: 7
+                val cd = cooldownDays.toIntOrNull()?.coerceIn(1, 90)
                 onSave(
                     newName,
                     CategorySettings(

@@ -32,7 +32,7 @@ import com.personalip.app.data.local.entity.WeeklyPlanEntity
         PersonaEntity::class,
         SettingEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

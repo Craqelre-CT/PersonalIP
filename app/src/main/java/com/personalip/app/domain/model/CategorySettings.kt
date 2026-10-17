@@ -9,14 +9,14 @@ package com.personalip.app.domain.model
  * @param autoTags 导入图片时是否自动生成标签。
  * @param postTone 该文件夹默认文案语气（亲和/真实/幽默/专业/激励）。
  * @param postGoal 该文件夹默认转化目标（点赞/评论/咨询/转发）。
- * @param cooldownDays 该文件夹同素材冷却期（天）。若为 null，则使用全局冷却期。
+ * @param cooldownDays 该文件夹同素材冷却期（天）。若为 null，则使用排期页的全局冷却期。
  */
 data class CategorySettings(
     val autoOcr: Boolean = true,
     val autoTags: Boolean = true,
     val postTone: String = "亲和",
     val postGoal: String = "点赞",
-    val cooldownDays: Int? = 7
+    val cooldownDays: Int? = null
 ) {
     companion object {
         val DEFAULT = CategorySettings()

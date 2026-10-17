@@ -31,6 +31,8 @@ object DatabaseModule {
         )
             // v1→v2：categories 表新增 settingsJson 列，默认值由 CategoryEntity.DEFAULT_SETTINGS_JSON 提供。
             .addMigrations(com.personalip.app.data.local.MigrationV1ToV2)
+            // v2→v3：weekly_plans 新增 date 列（排期从「周」改为「具体日期」）；分类设置移除 cooldownDays。
+            .addMigrations(com.personalip.app.data.local.MigrationV2ToV3)
             // 兜底：未来若再加字段未及时写迁移，允许重建而非崩溃（开发期友好）。
             .fallbackToDestructiveMigration()
             .build()

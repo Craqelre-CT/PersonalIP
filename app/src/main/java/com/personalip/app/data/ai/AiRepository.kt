@@ -18,7 +18,6 @@ import com.personalip.app.data.local.entity.MaterialEntity
 import com.personalip.app.data.local.entity.PersonaEntity
 import com.personalip.app.data.local.entity.PostEntity
 import com.personalip.app.data.material.MaterialRepository
-import com.personalip.app.data.schedule.WeekIdUtil
 import com.personalip.app.data.settings.AiConfigRepository
 import com.personalip.app.data.storage.FileNameUtil
 import com.personalip.app.data.storage.RootFolderRepository
@@ -155,8 +154,8 @@ class AiRepository @Inject constructor(
 
         // 8. 写 Markdown 到 SAF 输出目录。
         saveMarkdown(
-            weekId = plan.weekId,
-            dayOfWeek = plan.dayOfWeek,
+            batchId = plan.batchId,
+            date = plan.date,
             time = plan.time,
             categoryFolderName = category?.folderName ?: category?.displayName ?: "未分类",
             post = post.copy(id = postId),
@@ -266,8 +265,8 @@ class AiRepository @Inject constructor(
         val postId = postDao.upsert(post)
 
         saveMarkdown(
-            weekId = plan.weekId,
-            dayOfWeek = plan.dayOfWeek,
+            batchId = plan.batchId,
+            date = plan.date,
             time = plan.time,
             categoryFolderName = category?.folderName ?: category?.displayName ?: "未分类",
             post = post.copy(id = postId),
@@ -609,10 +608,10 @@ class AiRepository @Inject constructor(
         return scenes.firstOrNull { text.contains(it) }
     }
 
-    /** 写 Markdown 到 输出/<周>/<周几>/<时间_分类_编号>.md。 */
+    /** 写 Markdown 到 输出/<批次起始日>/<日期>/<时间_分类_编号>.md。 */
     private suspend fun saveMarkdown(
-        weekId: String,
-        dayOfWeek: Int,
+        batchId: String,
+        date: String,
         time: String,
         categoryFolderName: String,
         post: PostEntity,
@@ -621,8 +620,8 @@ class AiRepository @Inject constructor(
         imageDescription: String?
     ) = withContext(Dispatchers.IO) {
         val outputDir = rootFolderRepository.getOutputDir() ?: return@withContext
-        val weekDir = ensureNestedDir(outputDir, weekId) ?: return@withContext
-        val dayDir = ensureNestedDir(weekDir, WeekIdUtil.dayLabel(dayOfWeek)) ?: return@withContext
+        val batchDir = ensureNestedDir(outputDir, batchId) ?: return@withContext
+        val dayDir = ensureNestedDir(batchDir, date) ?: return@withContext
 
         val timePart = FileNameUtil.sanitize(time.replace(":", "-"))
         val catPart = FileNameUtil.sanitize(categoryFolderName)
