@@ -11,6 +11,8 @@ import com.personalip.app.data.local.dao.WeeklyPlanDao
 import com.personalip.app.data.local.entity.CategoryEntity
 import com.personalip.app.data.local.entity.MaterialEntity
 import com.personalip.app.data.material.MaterialRepository
+import com.personalip.app.data.storage.FolderConstants
+import com.personalip.app.data.storage.RootFolderRepository
 import com.personalip.app.domain.model.CategorySettings
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -39,7 +41,8 @@ class LibraryViewModel @Inject constructor(
     private val materialDao: MaterialDao,
     private val usageRecordDao: UsageRecordDao,
     private val weeklyPlanDao: WeeklyPlanDao,
-    private val settingsMapper: CategorySettingsMapper
+    private val settingsMapper: CategorySettingsMapper,
+    private val rootFolderRepository: RootFolderRepository
 ) : ViewModel() {
 
     val categories: StateFlow<List<CategoryEntity>> = categoryDao.observeAll()
@@ -124,25 +127,59 @@ class LibraryViewModel @Inject constructor(
     suspend fun createFolder(name: String): Long? = withContext(Dispatchers.IO) {
         val trimmed = name.trim()
         if (trimmed.isBlank()) return@withContext null
-        if (categoryDao.getByFolderName(trimmed) != null) {
+        // 物理目录名必须与 DB folderName 一致，故用同一套非法字符过滤规则。
+        val safeName = rootFolderRepository.sanitizeFolderName(trimmed)
+        if (safeName.isBlank()) {
+            _message.value = "文件夹名不能只含非法字符"
+            return@withContext null
+        }
+        if (categoryDao.getByFolderName(safeName) != null) {
             _message.value = "已存在同名文件夹"
             return@withContext null
         }
-        val id = categoryDao.upsert(CategoryEntity(displayName = trimmed, folderName = trimmed))
+        val id = categoryDao.upsert(CategoryEntity(displayName = safeName, folderName = safeName))
+        // 同步创建物理目录；失败则回滚 DB 行，避免出现"有文件夹但导入全失败"的状态。
+        val dir = rootFolderRepository.createCategoryDir(safeName)
+        if (dir == null) {
+            _message.value = "文件夹创建失败（无法写入存储，请检查根目录权限）"
+            categoryDao.deleteById(id)
+            return@withContext null
+        }
         id
     }
 
     /** 重命名文件夹。displayName 与 folderName 同时更新（保持一致策略）。 */
     suspend fun renameFolder(id: Long, newName: String): Boolean = withContext(Dispatchers.IO) {
-        val trimmed = newName.trim()
-        if (trimmed.isBlank()) return@withContext false
+        val cat = categoryDao.getById(id) ?: return@withContext false
+        val safeName = rootFolderRepository.sanitizeFolderName(newName)
+        if (safeName.isBlank()) {
+            _message.value = "文件夹名不能只含非法字符"
+            return@withContext false
+        }
+        if (safeName == cat.folderName) return@withContext true
         // 检查目标名是否被其他文件夹占用
-        val existing = categoryDao.getByFolderName(trimmed)
+        val existing = categoryDao.getByFolderName(safeName)
         if (existing != null && existing.id != id) {
             _message.value = "已存在同名文件夹"
             return@withContext false
         }
-        categoryDao.rename(id, trimmed, trimmed)
+        val oldName = cat.folderName
+        // 1. 先重命名物理目录（素材 filePath 中含旧 folderName，必须同步改）。
+        val renamed = rootFolderRepository.renameCategoryDir(oldName, safeName)
+        if (!renamed) {
+            _message.value = "重命名失败（无法操作存储目录）"
+            return@withContext false
+        }
+        // 2. 更新该文件夹下所有素材的 filePath（替换旧 folderName 为新名）。
+        val oldPrefix = "${FolderConstants.DIR_MATERIALS}/$oldName/"
+        val newPrefix = "${FolderConstants.DIR_MATERIALS}/$safeName/"
+        materialDao.getByCategory(id).forEach { m ->
+            if (m.filePath.startsWith(oldPrefix)) {
+                materialDao.update(m.copy(filePath = newPrefix + m.filePath.removePrefix(oldPrefix)))
+            }
+        }
+        // 3. 最后更新 DB 中的 folderName / displayName。
+        categoryDao.rename(id, safeName, safeName)
         true
     }
 

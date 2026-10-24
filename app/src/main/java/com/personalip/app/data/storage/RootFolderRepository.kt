@@ -121,6 +121,24 @@ class RootFolderRepository @Inject constructor(
     }
 
     /**
+     * 创建（若不存在）指定分类的素材目录，并返回目录。
+     * 名称会经过非法字符过滤，保证与物理目录名一致。
+     */
+    suspend fun createCategoryDir(folderName: String): DocumentFile? = withContext(Dispatchers.IO) {
+        val materials = getChildDir(FolderConstants.DIR_MATERIALS) ?: return@withContext null
+        findOrCreateDir(materials, folderName)
+    }
+
+    /** 重命名某分类的物理素材目录。 */
+    suspend fun renameCategoryDir(oldName: String, newName: String): Boolean = withContext(Dispatchers.IO) {
+        val materials = getChildDir(FolderConstants.DIR_MATERIALS) ?: return@withContext false
+        val dir = materials.findFile(oldName)?.takeIf { it.isDirectory } ?: return@withContext false
+        val safeNew = sanitizeFolderName(newName)
+        if (safeNew.isBlank()) return@withContext false
+        runCatching { dir.renameTo(safeNew) }.getOrDefault(false)
+    }
+
+    /**
      * 重新选择根文件夹。
      * @param newTreeUri 新选择文件夹的 tree Uri
      * @param migrate 是否将旧 PersonalIP 内容迁移到新位置
@@ -222,7 +240,7 @@ class RootFolderRepository @Inject constructor(
         return parent.createDirectory(safe)
     }
 
-    private fun sanitizeFolderName(name: String): String =
+    internal fun sanitizeFolderName(name: String): String =
         name.filter { it !in FolderConstants.FORBIDDEN_FILE_CHARS }.trim()
 
     private suspend fun getChildDir(name: String): DocumentFile? = withContext(Dispatchers.IO) {
