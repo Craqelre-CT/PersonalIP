@@ -61,8 +61,17 @@ class ScheduleViewModel @Inject constructor(
     private val _cooldownDays = MutableStateFlow(7)
     val cooldownDays: StateFlow<Int> = _cooldownDays.asStateFlow()
 
-    private val _selectedCategoryIds = MutableStateFlow<List<Long>>(emptyList())
-    val selectedCategoryIds: StateFlow<List<Long>> = _selectedCategoryIds.asStateFlow()
+    /**
+     * 参与分类及其权重。key=分类id，value=权重（1-10，默认1）。
+     * 空 map 表示「全部分类、权重均为1」。
+     */
+    private val _categoryWeights = MutableStateFlow<Map<Long, Int>>(emptyMap())
+    val categoryWeights: StateFlow<Map<Long, Int>> = _categoryWeights.asStateFlow()
+
+    /** 当前选中的分类 id 列表（从权重 map 派生，供 UI 判断选中态）。 */
+    val selectedCategoryIds: StateFlow<List<Long>> = _categoryWeights
+        .map { it.keys.toList() }
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     private val _generating = MutableStateFlow(false)
     val generating: StateFlow<Boolean> = _generating.asStateFlow()
@@ -101,8 +110,15 @@ class ScheduleViewModel @Inject constructor(
     fun setDays(days: Int) { _days.value = days.coerceIn(1, 60) }
     fun setCooldown(days: Int) { _cooldownDays.value = days }
     fun toggleCategory(id: Long) {
-        _selectedCategoryIds.value = _selectedCategoryIds.value.toMutableList()
-            .apply { if (contains(id)) remove(id) else add(id) }
+        _categoryWeights.value = _categoryWeights.value.toMutableMap().apply {
+            if (containsKey(id)) remove(id) else put(id, 1)
+        }
+    }
+
+    /** 设置某分类的权重（1-10）。若该分类未选中，自动加入。 */
+    fun setCategoryWeight(id: Long, weight: Int) {
+        val w = weight.coerceIn(1, 10)
+        _categoryWeights.value = _categoryWeights.value.toMutableMap().apply { put(id, w) }
     }
     fun addSlotTime() {
         // 新时段默认为最后一个时段 +1 小时（与 web 端逻辑保持一致）
@@ -135,7 +151,7 @@ class ScheduleViewModel @Inject constructor(
                     startDate = startDate,
                     days = _days.value,
                     slotTimes = _slotTimes.value,
-                    categoryIds = _selectedCategoryIds.value,
+                    categoryWeights = _categoryWeights.value,
                     globalCooldownDays = _cooldownDays.value
                 )
             }.getOrNull()

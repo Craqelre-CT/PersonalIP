@@ -36,14 +36,14 @@ class ScheduleRepository @Inject constructor(
      * 生成计划：从 [startDate] 起连续 [days] 天，每天 [slotTimes] 条。
      *
      * @param days 计划天数（1-60）
-     * @param categoryIds 参与选材的分类；空表示全部
+     * @param categoryWeights 参与选材的分类及其权重；空 map 表示「全部分类、权重均为 1」
      * @param globalCooldownDays 未单独设置冷却期的分类 / 未分类素材所用的兜底冷却期（天）
      */
     suspend fun generatePlan(
         startDate: LocalDate,
         days: Int,
         slotTimes: List<String>,
-        categoryIds: List<Long>,
+        categoryWeights: Map<Long, Int>,
         globalCooldownDays: Int
     ): PlanResult = withContext(Dispatchers.IO) {
         val batchId = WeekIdUtil.dateKey(startDate)
@@ -52,15 +52,23 @@ class ScheduleRepository @Inject constructor(
         weeklyPlanDao.deleteUnsentFrom(batchId, listOf(PostStatus.SENT, PostStatus.SKIPPED))
 
         val now = System.currentTimeMillis()
-        val categorySet = categoryIds.toSet()
+        val allCategories = categoryDao.getAll()
+
+        // 若未指定分类权重，则使用全部分类、权重均为 1。
+        val effectiveWeights: Map<Long, Int> = if (categoryWeights.isEmpty()) {
+            allCategories.associate { it.id to 1 }
+        } else {
+            categoryWeights
+        }
+        val categorySet = effectiveWeights.keys
 
         // 分类级冷却期：分类未单独设置（null）时用全局兜底。
-        val cooldownByCategory: Map<Long, Int?> = categoryDao.getAll()
+        val cooldownByCategory: Map<Long, Int?> = allCategories
             .associate { it.id to settingsMapper.decode(it.settingsJson).cooldownDays }
 
         // 全部候选（按使用次数升序，用得少的优先）。
         val all = materialDao.getAllSortedByUsage()
-            .filter { categorySet.isEmpty() || it.categoryId in categorySet }
+            .filter { it.categoryId in categorySet }
 
         // 过滤掉冷却期内（按各自分类冷却期）已发过的素材。
         val available = mutableListOf<MaterialEntity>()
@@ -70,35 +78,65 @@ class ScheduleRepository @Inject constructor(
             if (usageRecordDao.countSince(m.id, since) <= 0) available += m
         }
 
-        // days 天 × 每日条数 = 总槽位。按日期顺序填充，每个素材只取一次 → 同批不重复。
+        // 按分类分池（保持按使用次数升序的顺序）。
+        val pools: Map<Long, MutableList<MaterialEntity>> = available
+            .groupBy { it.categoryId }
+            .mapValues { it.value.toMutableList() }
+
+        // 构建加权分类序列：分类按权重重复出现；总权重为 0 时回退到全分类等权。
+        val totalWeight = effectiveWeights.values.sum()
+        val weightedSequence: List<Long> = if (totalWeight > 0) {
+            effectiveWeights.flatMap { (catId, w) -> List(w.coerceAtLeast(1)) { catId } }
+        } else {
+            allCategories.map { it.id }
+        }
+
+        // days 天 × 每日条数 = 总槽位。按加权序列依次取各分类池中的下一个素材。
+        val totalSlots = days * slotTimes.size
         val plans = mutableListOf<WeeklyPlanEntity>()
-        var cursor = 0
-        outer@ for (i in 0 until days) {
-            val date = startDate.plusDays(i.toLong())
-            for (time in slotTimes) {
-                if (cursor >= available.size) break@outer
-                val m = available[cursor++]
-                plans += WeeklyPlanEntity(
-                    batchId = batchId,
-                    date = WeekIdUtil.dateKey(date),
-                    dayOfWeek = date.dayOfWeek.value,
-                    time = time,
-                    materialId = m.id,
-                    status = PostStatus.DRAFT
-                )
+        var seqCursor = 0
+        var slot = 0
+        while (slot < totalSlots) {
+            val dayIdx = slot / slotTimes.size
+            val timeIdx = slot % slotTimes.size
+            val date = startDate.plusDays(dayIdx.toLong())
+
+            // 从加权序列中找下一个还有素材的分类。
+            var picked: MaterialEntity? = null
+            var guard = 0
+            while (guard < weightedSequence.size) {
+                val catId = weightedSequence[seqCursor % weightedSequence.size]
+                seqCursor++
+                val pool = pools[catId]
+                if (pool != null && pool.isNotEmpty()) {
+                    picked = pool.removeAt(0)
+                    break
+                }
+                guard++
             }
+            if (picked == null) break  // 所有分类池都空了
+
+            plans += WeeklyPlanEntity(
+                batchId = batchId,
+                date = WeekIdUtil.dateKey(date),
+                dayOfWeek = date.dayOfWeek.value,
+                time = slotTimes[timeIdx],
+                materialId = picked.id,
+                status = PostStatus.DRAFT
+            )
+            slot++
         }
         if (plans.isNotEmpty()) weeklyPlanDao.insertAll(plans)
 
         // 素材不足时给出每分类缺口。
-        val totalSlots = days * slotTimes.size
         val shortfall: Shortfall? = if (plans.size < totalSlots) {
-            val cats = if (categorySet.isEmpty()) categoryDao.getAll()
-            else categoryDao.getAll().filter { it.id in categorySet }
+            val cats = allCategories.filter { it.id in categorySet }
             Shortfall(
                 totalSlots = totalSlots,
                 available = plans.size,
-                byCategory = cats.map { cat -> cat.displayName to available.count { it.categoryId == cat.id } }
+                byCategory = cats.map { cat ->
+                    cat.displayName to (pools[cat.id]?.size ?: 0)
+                }
             )
         } else null
 

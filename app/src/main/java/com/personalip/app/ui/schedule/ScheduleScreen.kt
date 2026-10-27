@@ -74,6 +74,7 @@ fun ScheduleScreen(
     val slotTimes by viewModel.slotTimes.collectAsStateWithLifecycle()
     val cooldownDays by viewModel.cooldownDays.collectAsStateWithLifecycle()
     val selectedCategoryIds by viewModel.selectedCategoryIds.collectAsStateWithLifecycle()
+    val categoryWeights by viewModel.categoryWeights.collectAsStateWithLifecycle()
     val items by viewModel.items.collectAsStateWithLifecycle()
     val generating by viewModel.generating.collectAsStateWithLifecycle()
     val generatingPlanId by viewModel.generatingPlanId.collectAsStateWithLifecycle()
@@ -168,14 +169,53 @@ fun ScheduleScreen(
                             }
                         }
 
-                        Text("参与分类（不选则全部）", style = MaterialTheme.typography.labelLarge)
+                        Text("参与分类（不选则全部，默认权重相同）", style = MaterialTheme.typography.labelLarge)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             categories.forEach { cat ->
+                                val selected = selectedCategoryIds.contains(cat.id)
+                                val w = categoryWeights[cat.id] ?: 1
                                 FilterChip(
-                                    selected = selectedCategoryIds.contains(cat.id),
+                                    selected = selected,
                                     onClick = { viewModel.toggleCategory(cat.id) },
-                                    label = { Text(cat.displayName) }
+                                    label = {
+                                        Text(if (selected) "${cat.displayName} ×$w" else cat.displayName)
+                                    }
                                 )
+                            }
+                        }
+
+                        // 已选分类的权重调节区（仅当选择了分类时显示）。
+                        if (selectedCategoryIds.isNotEmpty()) {
+                            Text("分类权重（数值越大出现越多，1-10）", style = MaterialTheme.typography.labelLarge)
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                categories.filter { it.id in selectedCategoryIds }.forEach { cat ->
+                                    val w = categoryWeights[cat.id] ?: 1
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            cat.displayName,
+                                            modifier = Modifier.weight(1f),
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                        IconButton(
+                                            onClick = { viewModel.setCategoryWeight(cat.id, w - 1) },
+                                            enabled = w > 1
+                                        ) { Text("−") }
+                                        Text(
+                                            "$w",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            modifier = Modifier.width(32.dp),
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                        )
+                                        IconButton(
+                                            onClick = { viewModel.setCategoryWeight(cat.id, w + 1) },
+                                            enabled = w < 10
+                                        ) { Text("+") }
+                                    }
+                                }
                             }
                         }
 
