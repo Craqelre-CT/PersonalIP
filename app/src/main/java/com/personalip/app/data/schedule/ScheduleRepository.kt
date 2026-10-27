@@ -105,16 +105,52 @@ class ScheduleRepository @Inject constructor(
         PlanResult(plans = plans, shortfall = shortfall)
     }
 
-    /** 用另一个未占用素材替换某条排期的素材（同批次内不重复）。 */
-    suspend fun replaceMaterial(planId: Long): Boolean = withContext(Dispatchers.IO) {
-        val current = weeklyPlanDao.getById(planId) ?: return@withContext false
-        val batchPlans = weeklyPlanDao.getBatch(current.batchId)
-        val usedIds = batchPlans.map { it.materialId }.toMutableSet()
-        val replacement = materialDao.getAllSortedByUsage()
-            .firstOrNull { it.id !in usedIds } ?: return@withContext false
-        weeklyPlanDao.update(current.copy(materialId = replacement.id))
-        true
-    }
+    /**
+     * 用另一个可用素材替换某条排期的素材。
+     *
+     * 替换策略（按优先级递减）：
+     * 1. 同类素材优先：先查当前素材所在分类，在冷却期可用的同类候选里随机挑一个；
+     * 2. 同类冷却期可用数 < 2（太少，会反复来回换）→ 扩大到「全部分类 + 冷却期可用」的池子里随机挑；
+     * 3. 同批次已占用的素材一律排除（不管哪个池子）。
+     *
+     * @param globalCooldownDays 全局冷却期（分类未单独设置时的兜底），单位：天。
+     */
+    suspend fun replaceMaterial(planId: Long, globalCooldownDays: Int): Boolean =
+        withContext(Dispatchers.IO) {
+            val current = weeklyPlanDao.getById(planId) ?: return@withContext false
+            val currentMaterial = materialDao.getById(current.materialId)
+                ?: return@withContext false
+            val batchPlans = weeklyPlanDao.getBatch(current.batchId)
+            val usedIds = batchPlans.map { it.materialId }.toMutableSet()
+            // 正在被替换的这张也算"已占用"，不允许替换成自己。
+            usedIds += current.materialId
+
+            // 冷却期：分类有独立设置则优先用分类的，兜底全局。
+            val catSettings = categoryDao.getById(currentMaterial.categoryId)
+                ?.settingsJson?.let { settingsMapper.decode(it) }
+            val cooldownDays = catSettings?.cooldownDays ?: globalCooldownDays
+            val since = System.currentTimeMillis() -
+                cooldownDays.toLong() * 24L * 60L * 60L * 1000L
+            val cooldownBlockedIds = usageRecordDao.recentlyUsedMaterialIds(since).toSet()
+
+            // 全部基础候选 = 同批次未用 + 冷却期未用。
+            val baseCandidates = materialDao.getAllSortedByUsage()
+                .filter { it.id !in usedIds && it.id !in cooldownBlockedIds }
+
+            // 池 A：同类候选（优先）。
+            val sameCategory = baseCandidates.filter { it.categoryId == currentMaterial.categoryId }
+
+            val pool: List<MaterialEntity> = if (sameCategory.size >= 2) {
+                sameCategory
+            } else {
+                // 同类不足 → 扩大到全部分类。
+                baseCandidates
+            }
+
+            val replacement = pool.randomOrNull() ?: return@withContext false
+            weeklyPlanDao.update(current.copy(materialId = replacement.id))
+            true
+        }
 
     /** 上移 / 下移某条排期（交换相邻两条的 date + time，保留各自 id 与 materialId）。 */
     suspend fun movePlan(planId: Long, up: Boolean): Boolean = withContext(Dispatchers.IO) {

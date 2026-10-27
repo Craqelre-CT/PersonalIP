@@ -24,6 +24,12 @@ interface UsageRecordDao {
     )
     suspend fun usedInWeek(materialId: Long, weekId: String): Int
 
+    /** 返回 [since] 时间点之后被使用过的全部 materialId（去重）。 */
+    @Query(
+        "SELECT DISTINCT materialId FROM usage_records WHERE usedAt >= :since"
+    )
+    suspend fun recentlyUsedMaterialIds(since: Long): List<Long>
+
     @Query("SELECT materialId FROM usage_records WHERE weekId = :weekId")
     suspend fun materialIdsUsedInWeek(weekId: String): List<Long>
 

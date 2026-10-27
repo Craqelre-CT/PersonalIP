@@ -150,7 +150,7 @@ class ScheduleViewModel @Inject constructor(
 
     fun replaceMaterial(planId: Long) {
         viewModelScope.launch {
-            val ok = scheduleRepository.replaceMaterial(planId)
+            val ok = scheduleRepository.replaceMaterial(planId, _cooldownDays.value)
             _message.value = if (ok) "已替换为其它素材" else "没有更多可用素材"
         }
     }
