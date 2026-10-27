@@ -35,6 +35,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -81,6 +82,7 @@ fun ScheduleScreen(
     // AI 配置 / 生成对话框状态。
     var showAiConfig by remember { mutableStateOf(false) }
     var showGenerateDialog by remember { mutableStateOf<Long?>(null) }
+    var showClearConfirm by remember { mutableStateOf(false) }
 
     // 计划天数输入框的本地状态（与 days 双向同步）。
     var daysInput by remember { mutableStateOf(days.toString()) }
@@ -199,6 +201,15 @@ fun ScheduleScreen(
                         ) {
                             Text("AI 接口配置")
                         }
+
+                        // 清空未发排期，用于重新生成。
+                        OutlinedButton(
+                            onClick = { showClearConfirm = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = items.any { it.plan.status != PostStatus.SENT && it.plan.status != PostStatus.SKIPPED }
+                        ) {
+                            Text("清除现有排期", color = MaterialTheme.colorScheme.error)
+                        }
                     }
                 }
             }
@@ -221,6 +232,26 @@ fun ScheduleScreen(
     // AI 接口配置对话框。
     if (showAiConfig) {
         AiConfigDialog(onDismiss = { showAiConfig = false })
+    }
+
+    // 清除排期确认对话框。
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = { Text("清除现有排期") },
+            text = { Text("将删除所有未发排期（草稿/待发），已发和跳过的历史会保留。确定吗？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.clearPlans()
+                        showClearConfirm = false
+                    }
+                ) { Text("确定", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) { Text("取消") }
+            }
+        )
     }
 
     // 两阶段生成对话框（识别 → 确认 → 写文案）。

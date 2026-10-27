@@ -155,6 +155,14 @@ class ScheduleViewModel @Inject constructor(
         }
     }
 
+    /** 清除所有未发布的排期（保留已发/跳过历史），用于重新生成。 */
+    fun clearPlans() {
+        viewModelScope.launch {
+            val deleted = runCatching { scheduleRepository.clearUnsentPlans() }.getOrDefault(0)
+            _message.value = "已清除 $deleted 条未发排期"
+        }
+    }
+
     fun movePlan(planId: Long, up: Boolean) {
         viewModelScope.launch { scheduleRepository.movePlan(planId, up) }
     }
