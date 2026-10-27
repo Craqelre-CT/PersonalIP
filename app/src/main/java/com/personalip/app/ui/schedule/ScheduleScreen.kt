@@ -202,11 +202,11 @@ fun ScheduleScreen(
                             Text("AI 接口配置")
                         }
 
-                        // 清空未发排期，用于重新生成。
+                        // 清空从今天起的所有排期，用于从头重新生成。
                         OutlinedButton(
                             onClick = { showClearConfirm = true },
                             modifier = Modifier.fillMaxWidth(),
-                            enabled = items.any { it.plan.status != PostStatus.SENT && it.plan.status != PostStatus.SKIPPED }
+                            enabled = items.isNotEmpty()
                         ) {
                             Text("清除现有排期", color = MaterialTheme.colorScheme.error)
                         }
@@ -239,7 +239,7 @@ fun ScheduleScreen(
         AlertDialog(
             onDismissRequest = { showClearConfirm = false },
             title = { Text("清除现有排期") },
-            text = { Text("将删除所有未发排期（草稿/待发），已发和跳过的历史会保留。确定吗？") },
+            text = { Text("将删除从今天起的所有排期（包括已发/跳过），之后可重新生成计划。确定吗？") },
             confirmButton = {
                 TextButton(
                     onClick = {

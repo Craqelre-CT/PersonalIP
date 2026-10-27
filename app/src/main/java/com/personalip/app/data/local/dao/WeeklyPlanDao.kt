@@ -33,6 +33,10 @@ interface WeeklyPlanDao {
     @Query("DELETE FROM weekly_plans WHERE date >= :sinceDate AND status NOT IN (:keepStatuses)")
     suspend fun deleteUnsentFrom(sinceDate: String, keepStatuses: List<PostStatus>): Int
 
+    /** 从 [sinceDate]（含）起，删除所有排期（包括已发/跳过），用于从头重新生成。 */
+    @Query("DELETE FROM weekly_plans WHERE date >= :sinceDate")
+    suspend fun deleteAllFrom(sinceDate: String): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(plans: List<WeeklyPlanEntity>)
 

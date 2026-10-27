@@ -153,13 +153,12 @@ class ScheduleRepository @Inject constructor(
         }
 
     /**
-     * 清除当前所有未发布的排期（草稿/待发），保留已发/跳过历史。
-     * 用于用户想清空现有计划后重新生成。
+     * 清除从今天起的所有排期（包括已发/跳过），用于从头重新生成计划。
      * @return 删除的排期条数。
      */
-    suspend fun clearUnsentPlans(): Int = withContext(Dispatchers.IO) {
+    suspend fun clearAllPlans(): Int = withContext(Dispatchers.IO) {
         val since = WeekIdUtil.dateKey(LocalDate.now())
-        weeklyPlanDao.deleteUnsentFrom(since, listOf(PostStatus.SENT, PostStatus.SKIPPED))
+        weeklyPlanDao.deleteAllFrom(since)
     }
 
     /** 上移 / 下移某条排期（交换相邻两条的 date + time，保留各自 id 与 materialId）。 */
